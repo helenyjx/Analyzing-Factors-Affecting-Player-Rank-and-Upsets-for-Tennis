@@ -1,0 +1,321 @@
+---
+title: "Group Project Draft Report"
+author: "Gray Team (Nick Carroll, Emmanuel Ruhamyankaka, Jiaxin Ying, Song Young Oh)"
+date: "2022-12-04"
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ISLR2)
+library(gtsummary)
+library(ggplot2)
+library(kableExtra)
+library(broom)
+library(stargazer)
+library(tidyverse)
+library(car)
+library(MASS)
+library(foreign)
+library(knitr)
+library(xtable)
+library(nnet)
+library(caret)
+
+# Import tennis data
+tennis2021 <- read.csv("atp_matches_2021.csv")
+
+# Creating a dataframe of players and their average ranks
+players <- unique(c(tennis2021$winner_id, tennis2021$loser_id))
+averageRank <- c()
+height <- c()
+age <- c()
+hand <- c()
+nationality <- c()
+for (eachPlayer in players){
+  averageRank <- append(averageRank, mean(c(tennis2021[tennis2021$winner_id == eachPlayer, "winner_rank"], tennis2021[tennis2021$loser_id == eachPlayer, "loser_rank"]), na.rm = TRUE))
+  height <- append(height, max(c(tennis2021[tennis2021$winner_id == eachPlayer, "winner_ht"], tennis2021[tennis2021$loser_id == eachPlayer, "loser_ht"])))
+  age <- append(age, mean(c(tennis2021[tennis2021$winner_id == eachPlayer, "winner_age"], tennis2021[tennis2021$loser_id == eachPlayer, "loser_age"])))
+  hand <- append(hand, max(c(tennis2021[tennis2021$winner_id == eachPlayer, "winner_hand"], tennis2021[tennis2021$loser_id == eachPlayer, "loser_hand"])))
+  nationality <- append(nationality, max(c(tennis2021[tennis2021$winner_id == eachPlayer, "winner_ioc"], tennis2021[tennis2021$loser_id == eachPlayer, "loser_ioc"])))
+}
+playerStats <- data.frame(players, averageRank, height, age, hand, nationality)
+
+# Removing NA's and creating a factor variable from hand and nationality
+removeNA <- na.omit(playerStats)
+handSubset <- subset(removeNA,hand != 'U')
+handSubset$hand_fac <- relevel(factor(handSubset$hand), ref = 'R')
+handSubset$nat_fac <- factor(handSubset$nationality)
+
+# Creating a region variable
+handSubset$region[handSubset$nat_fac %in% c("USA", "CAN", "DOM", "MEX")] <- "North America"
+handSubset$region[handSubset$nat_fac %in% c("COL", "GEO", "ARG", "URU", "ECU", "PER", "BRA", "BOL", "ESA", "PAR", "VEN", "CHI", "BAR")] <- "South America"
+handSubset$region[handSubset$nat_fac %in% c("GER", "FRA", "GBR", "ESP", "ITA", "SUI", "BEL", "NED", "AUT", "SWE", "GRE", "POR", "MON","CZE", "SRB", "BLR", "CRO", "RUS", "POL", "FIN", "DEN", "HUN", "BUL", "SLO", "SWE","LTU", "NOR", "SVK", "BIH", "UKR", "MDA", "ROU", "EST", "CYP", "LAT")] <- "Europe"
+handSubset$region[handSubset$nat_fac %in% c("IND", "KAZ", "JPN", "CHN", "TPE",  "KOR", "INA", "NZL", "PAK", "THA", "UZB")] <- "Asia"
+handSubset$region[handSubset$nat_fac %in% c("TUR", "ISR", "QAT", "LBN")] <- "Mid East"
+handSubset$region[handSubset$nat_fac %in% c("RSA", "ZIM", "EGY", "LIB", "TUN")] <- "Africa"
+handSubset$region[handSubset$nat_fac %in% c("AUS")] <- "Australia"
+handSubset$region <- relevel(factor(handSubset$region), ref = "North America")
+
+# Creating a Developed Country Variable
+handSubset$country=rep(NA,326)
+for (i in 1:326) {
+  if(handSubset$nat_fac[i] %in% c("AUT","CAN","CYP","BEL","CZE","USA","AUS","SWE","JPN","DEN","ESP","EST","FIN","FRA","GBR","GER","HUN","ISR","ITA","LAT","LBN","LIB","LTU","NED","NOR","NZL","POR","SLO","SUI","SVK","SWE","TUR")){
+    handSubset$country[i]="developed"
+  } else{
+    handSubset$country[i]="developing"
+  }
+}
+
+# Reviewing Upsets
+tennis_dropNA <- tennis2021
+tennis_dropNA <- drop_na(tennis_dropNA)
+tennis_upsetPotential <- subset(tennis_dropNA, abs(loser_rank - winner_rank) >= 10)
+tennis_upsetPotential$upset <- (tennis_upsetPotential$winner_rank - tennis_upsetPotential$loser_rank) >= 10
+tennis_upsetPotential$tour_fac <- factor(tennis_upsetPotential$tourney_level)
+tennis_upsetPotential$surface_fac <- relevel(factor(tennis_upsetPotential$surface), ref = "Hard")
+tennis_upsetPotential$winner_hand_fac <- relevel(factor(tennis_upsetPotential$winner_hand), ref = 'R')
+
+```
+
+## Abstract
+This project analyzed Tennis Abstract's men's ATP tour-level dataset to understand the ability to predict a player's rank and the factors that impact an upset with respect to men's tennis.  The main findings are: 1) a player's attributes (i.e. height, age, etc.) alone are not sufficient to predict a player's rank, more analysis is required to understand how to quantify and analyze a player's skill and how it impacts his rank, and 2) tournament type, match surface, and age are the primary predictors of an upset.  The model used to analyze an upset had a 95% accuracy.
+
+## Introduction
+Within recent decades sports have become a major use case of data analytics, and tennis is no exception.  Furthermore, in 2021, more than half of states began the process of legalizing sports betting, whereas, until recently, sports betting was only allowed in select regions.  This has exploded an industry where there are large financial implications to the ability to predict a sports performance.  For this analysis, the dataset of men's ATP tour-level matches was studied for the 2021 season.  This dataset has been uploaded by Jeff Sackmann manager of Tennis Abstract[1].  The dataset contains a sample size of 2,733 tennis matches and includes 49 variables which cover both continuous and categorical variables.  It consists of the basic information for each match.  The data can be grouped into two parts: data that describes each match's attributes, and data that describes the results of the match, including the winner's and loser's attributes, and performance separately.
+
+Specifically, the first part of the data includes the date of the match, along with a match-specific identifier for the tournament. There is also information describing the tournament level, which is broken down into five categories. Meanwhile, the second part of the data covers the player specific data, with a wide range of variables about the winner and loser, including their name, age, height, nationality, and handedness. The data also includes each player's ATP ranking information at the tournament date. Moreover, this portion of the data describes the performances of the winner and loser, such as each player's number of first serves made, and break points saved during the match.
+
+With this data, the main goal of this analysis is to answer the following two research questions: 
+
+1) Can a tennis player's rank be predicted by his attributes, specifically: height, age, nationality, and handedness?
+2) Which factors have the greatest impact on the likelihood of an upset? (Throughout this analysis, an upset is defined as when the winner held a rank of at least 10 ranks lower than the loser.)
+
+## Methods
+**Research Question 1**
+\
+To analyze the first research question, a multiple linear regression model was used to predict the outcome of a tennis player's rank based upon his attributes. Although rank is not technically a continuous variable, it can be estimated as a continuous variable on this scale, because rank has at least 200 possible options in this dataset. Furthermore, while rank is the desired outcome, this analysis actually seeks to predict average rank over the course of the season. While rank changes over the season in accordance with performance, a player's attributes are (approximately) static over the season, so it makes more sense to predict average rank. In this scenario, average rank is actually a continuous variable because it can contain any degree of decimal values. 
+
+This dataset includes 49 variables; however many of the variables are not appropriate for the focus of this analysis. Therefore, all variables have been chosen a priori based upon domain knowledge of the drivers of a player's performance in sports. Since the first question's analysis focuses on predicting a tennis player’s average rank, only factors which are player specific will be considered. Specifically, variables which are tournament-specific (i.e. tournament name) or match-specific (i.e. round or serve points) were included in the model. In professional sports, high performers usually have unique attributes compared with the rest of the normal population, including specific height ranges, age ranges, and regional and socio-economic backgrounds. Handedness is an attribute with particular importance in tennis, because it is common for one player to have a dominant swing known as a "forehand". Due to these expectations, the variables selected for the linear regression model to predict a player's average rank is height, age, nationality, and handedness. 
+
+**Research Question 2**
+\
+To analyze the second research question, a multiple logistic regression model was used to evaluate the probability of an upset occurring. As previously mentioned, an upset is defined as the winner's rank being at least 10 ranks lower than the loser's. Due to the binary nature of an upset and the multiple potential predictor variables, a multiple logistic regression is the appropriate model for this analysis.
+
+Similarly, for the second research question, most of the variables in the dataset are not appropriate for this analysis; and again, predictor variables are chosen a priori based upon expectations from sports knowledge. Variables that are not appropriate for this analysis include match statistics (because this information would not be available prior to a match, and would be collinear with the outcome of the match) and tournament information that is not play-specific (i.e. tournament id and name). Conversely, based upon the exploratory data analysis, variables that are of particular interest are Tournament Type and Size, Surface Type, and the winner's attributes (i.e. height). The player's attributes (height, age, etc.) are chosen to understand how the player can impact the likelihood of an upset. The tournament/match information (surface, size, etc.) can provide inference information into how external factors impact the likelihood of an upset. Finally, tournament type can provide inference information into how a player's mentality can change in different match situations. Below plots show the likelihood of an upset against different predictors. 
+
+```{r echo=FALSE, fig.width=8, fig.height=4, fig.align="center", out.width="80%"}
+# Reviewing Upsets
+tennis2021$upset <- (tennis2021$loser_rank - tennis2021$winner_rank) < -10
+tennis2021$tour_fac <- factor(tennis2021$tourney_level)
+tennis2021$surface_fac <- factor(tennis2021$surface)
+
+par(mfrow=c(2,3))
+
+tour <- table(c(tennis2021[tennis2021$upset, "upset"],
+                tennis2021[(tennis2021$loser_rank - tennis2021$winner_rank) > 10, "upset"]),
+              c(tennis2021[tennis2021$upset, "tour_fac"],
+                tennis2021[(tennis2021$loser_rank - tennis2021$winner_rank) > 10, "tour_fac"]))
+norm_tour <- prop.table(tour,2)
+barplot(norm_tour, , col=c(rgb(1,0,0,0.5), rgb(0,0,1,0.5)), xlab = "Tournament Type", ylab = "Proportion of Upsets", main = "Likelihood of Upsets vs.\nTournament Type")
+
+barplot(prop.table(table(c(tennis2021[tennis2021$upset, "upset"],
+                tennis2021[(tennis2021$loser_rank - tennis2021$winner_rank) > 10, "upset"]),
+              c(tennis2021[tennis2021$upset, "draw_size"],
+                tennis2021[(tennis2021$loser_rank - tennis2021$winner_rank) > 10, "draw_size"])),
+        2), col=c(rgb(1,0,0,0.5), rgb(0,0,1,0.5)), xlab = "Tournament Size", ylab = "Proportion of Upsets", main = "Likelihood of Upsets vs.\nTournament Size")
+
+barplot(prop.table(table(c(tennis2021[tennis2021$upset, "upset"],
+                tennis2021[(tennis2021$loser_rank - tennis2021$winner_rank) > 10, "upset"]),
+              c(tennis2021[tennis2021$upset, "surface_fac"],
+                tennis2021[(tennis2021$loser_rank - tennis2021$winner_rank) > 10, "surface_fac"])),
+        2), col=c(rgb(1,0,0,0.5), rgb(0,0,1,0.5)), xlab = "Surface Type", ylab = "Proportion of Upsets", main = "Likelihood of Upsets vs.\nSurface Type")
+legend('bottom',legend=c('Not Upset', 'Upset'),
+      fill = c(rgb(1,0,0,0.5), rgb(0,0,1,0.5)))
+
+
+age <- table(c(tennis2021[tennis2021$upset, "upset"],
+                tennis2021[(tennis2021$loser_rank - tennis2021$winner_rank) > 10, "upset"]),
+              c(tennis2021[tennis2021$upset, "winner_age"],
+                tennis2021[(tennis2021$loser_rank - tennis2021$winner_rank) > 10, "winner_age"]))
+norm_age <- prop.table(age,2)
+plot(names(norm_age[1,-50]), norm_age[1,-50], col=rgb(1,0,0,0.5), lwd = 3, type = "l", xlab = "Winner's Age", ylab = "Proportion of Upsets", main = "Likelihood of Upsets vs. Age")
+lines(names(norm_age[2,-50]), norm_age[2,-50], col=rgb(0,0,1,0.5), lwd = 3)
+
+height <- table(c(tennis2021[tennis2021$upset, "upset"],
+                tennis2021[(tennis2021$loser_rank - tennis2021$winner_rank) > 10, "upset"]),
+              c(tennis2021[tennis2021$upset, "winner_ht"],
+                tennis2021[(tennis2021$loser_rank - tennis2021$winner_rank) > 10, "winner_ht"]))
+norm_height <- prop.table(height,2)
+plot(names(norm_height[1,-50]), norm_height[1,-50], col=rgb(1,0,0,0.5), lwd = 3, type = "l", xlab = "Winner's Height", ylab = "Proportion of Upsets", main = "Likelihood of Upsets vs. Height")
+lines(names(norm_height[2,-50]), norm_height[2,-50], col=rgb(0,0,1,0.5), lwd = 3)
+legend('bottom', legend=c('Not Upset', 'Upset'),
+      fill = c(rgb(1,0,0,0.5), rgb(0,0,1,0.5)))
+```
+\
+Finally, there are a total of 5,570 missing values in the original dataset, and 65 missing values exist in the subset used for selecting each player's statistics. This analysis assumes that the missing data is random, and safe to be excluded from the dataset. Furthermore, since the exploratory data analysis suggests weak correlations in the research questions, with substantial noise, data imputation methods would bias the analysis to suggest there are greater correlations than the data actually suggests.
+
+To analyze the effectiveness of the model, the r-squared value was reviewed, and the predictions were compared to the actual values. After understanding the effectiveness of the model, the model's assumptions are assessed to ensure the model is appropriate. The model's validity is based upon its adherence to the linear regression assumptions: 1) that there is a linear relationship between the predictors and a player's rank, 2) that the players are independent of each other, 3) that the error in the model is approximately normal, and 4) that the residuals do not have a pattern (i.e. growing with their variables).
+
+## Results
+**Research Question 1**
+\
+To explore the relationship between a player's rank and his natural characteristics (height, age, nationality, and handedness), scatter plots were reviewed showing the player's rank against each of his characteristics. The scatter plots did not show a clear correlation between a player's rank and characteristics.  
+
+```{r echo=FALSE, fig.width=8, fig.height=6, fig.align="center", out.width="70%"}
+playerStats$hand <- factor(playerStats$hand)
+playerStats$nationality <- factor(playerStats$nationality)
+playerStats$country=rep(NA,393)
+for (i in 1:393) {
+  if(playerStats$nationality[i] %in% c("AUT","CAN","CYP","BEL","CZE","USA","AUS","SWE","JPN","DEN","ESP","EST","FIN","FRA","GBR","GER","HUN","ISR","ITA","LAT","LBN","LIB","LTU","NED","NOR","NZL","POR","SLO","SUI","SVK","SWE","TUR")){
+    playerStats$country[i]="developed"
+  } else{
+    playerStats$country[i]="developing"
+  }
+}
+par(mfrow=c(2,3))
+boxplot(averageRank ~ country, data = playerStats, xlab = "Country Development Status", ylab = "Average Rank", main = "Rank vs. Country Development", col=rgb(0,0,1,0.5))
+
+playerStats$region[playerStats$nationality %in% c("USA", "CAN", "DOM", "MEX")] <- "N. Amer."
+playerStats$region[playerStats$nationality %in% c("COL", "GEO", "ARG", "URU", "ECU", "PER", "BRA", "BOL", "ESA", "PAR", "VEN",
+                                              "CHI", "BAR")] <- "S. Amer."
+playerStats$region[playerStats$nationality %in% c("GER", "FRA", "GBR", "ESP", "ITA", "SUI", "BEL", "NED", "AUT", "SWE", "GRE",
+                                              "POR", "MON")] <- "W Eur."
+playerStats$region[playerStats$nationality %in% c("CZE", "SRB", "BLR", "CRO", "RUS", "POL", "FIN", "DEN", "HUN", "BUL", "SLO", "SWE",
+                                              "LTU", "NOR", "SVK", "BIH",  "UKR", "MDA", "ROU", "EST",  "CYP",
+                                              "LAT")] <- "E Eur."
+playerStats$region[playerStats$nationality %in% c("IND", "KAZ", "JPN", "CHN", "TPE",  "KOR", "INA", "NZL", "PAK",
+                                              "THA",  "AUS", "UZB")] <- "Asia"
+playerStats$region[playerStats$nationality %in% c("TUR", "ISR", "QAT", "LBN")] <- "Mid East"
+playerStats$region[playerStats$nationality %in% c("RSA", "ZIM", "EGY", "LIB", "TUN")] <- "Africa"
+
+boxplot(averageRank ~ region, data = playerStats, xlab = "Continental Region", ylab = "Average Rank", main = "Rank vs. Continental Region", col=rgb(0,0,1,0.5))
+plot(averageRank ~ height, data = playerStats, ylab = "Average Rank", main = "Rank vs. Height", col=rgb(0,0,1,0.5))
+plot(averageRank ~ age, data = playerStats, ylab = "Average Rank", main = "Rank vs. Age", col=rgb(0,0,1,0.5))
+plot(averageRank ~ hand, data = playerStats, xlim = c(1.5,3.5), xlab = "Hand", ylab = "Average Rank", main = "Rank vs. Hand", col=rgb(0,0,1,0.5))
+plot(averageRank ~ nationality, data = playerStats, xlab = "Nationality", ylab = "Average Rank", main = "Rank vs. Nationality", col=rgb(0,0,1,0.5))
+
+```
+
+Additionally, while the exploratory plots didn't show a clear correlation between nationality and rank, there were some nationalities that clearly tend to have higher ranks than others. It is assumed that some nationalities tend to perform better than others because some countries have better access to certain sports than others, due to underlying socio-economic and cultural reasons. For example, countries with strong economies might invest more in athletic training, have better facilities/courts, and invest in access for sports where there is greater demand.  To explore simpler relationships between nationality and rank, the 72 countries in the dataset were grouped into subsets. The first subset split the nationalities into "developed" and "developing" countries. A "developing" country has a lower GDP than developed countries and a less mature economy. Conversely, a "developed" country has a higher GDP and a more mature economy. For the purposes of this analysis, the "developed" countries are listed by following the country classification of UN[2] and all other countries are considered "developing".  Additionally, the subset of developing and developed countries can be compared with the subset of countries by region[3].  However, with these subsets, exploratory analysis did not show a clear correlation between rank and grouped nationalities.
+
+The coefficients of the linear regression model used to predict a player's rank, along with the statistical analysis, are shown in the table below. From the table below, handedness is not a statistically significant predictor variable, and region is only statistically significant if you are from Africa.  According to the model, if you are from Africa, you are expected to have a rank over 200 higher than a player who has otherwise similar attributes.  Height and Age are the attributes that are statistically significant.  For every year older a player is, he is expected to reduce his average rank by approximately 11.  Similarly, for every cm increase in height, a player is expected to be able to reduce his average rank by almost 4.  Despite the fact that these two attributes are statistically significant, the R-squared value is less than 15%, meaning that the model can only account for less than 15% of the error in the data. When comparing the predicted average rank values to the actual average rank values, on average, the predictions are only within 277% of the actual values.  
+
+```{r echo=FALSE, fig.width=8, fig.height=4, fig.align="center", out.width="80%", message=FALSE, results="asis"}
+# Creating a linear regression model
+names_ <-c("height","age","handedness Right","handedness Left","region Africa","region Asia","region Australia","region Europe","region Mid East","region South America")
+fit1 <-lm(averageRank~height+age+hand_fac+region,data=handSubset)
+
+mat1 <- matrix(c(round(summary(fit1)$coefficients[2:11,1:3], 4),
+                format(round(summary(fit1)$coefficients[2, 4], 4), scientific=FALSE), "<.0001",
+                format(round(summary(fit1)$coefficients[4:11, 4],4), scientific=FALSE)), nrow = 10, ncol = 4)
+
+mat1[3,] <- c("-------", "-------", "-------", "-------")
+
+mat1v2 <- rbind(mat1[1:4,], c("-------", "-------", "-------", "-------"), mat1[5:10,])
+
+rownames(mat1v2) <- c("Height", "Age", "Hand: Right", "Hand: Left", "Region: North America", "Region: Africa",
+                      "Region: Asia", "Region: Australia", "Region: Europe", "Region: Middle East",
+                      "Region: South America")
+
+kable(mat1v2,row.names=TRUE,
+      col.names=c("Estimate", "Standard Error", "Statistic",
+                  "p-value"),format="html",booktabs=T,
+      caption="**Predicting Players' Average Ranks**") %>%
+  kable_styling(position="center",latex_options = c("hold_position"))
+    
+
+```
+
+Below is a scatter plot of average rank against age, showing the predicted values overlaid with the actual values. The predicted values clearly do not accurately account for the vast amount of variability in the players' average ranks.  
+
+```{r echo=FALSE, fig.width=8, fig.height=4, fig.align="center", out.width="80%", message=FALSE, results="asis"}
+# Plot Rank vs age with actual values vs. predicted values
+plot(handSubset$age, handSubset$averageRank,ylab =" Average Rank",xlab = "Age", main = "Average Rank Against Age",col=rgb(1,0,0,0.5))
+points(handSubset$age, fitted(fit1), col=rgb(0,0,1,0.5))
+```
+
+Since the model is not a good predictor of a player's average rank, it is particularly important to assess the model's validity and review the linear regression assumptions: 1) that there is a linear relationship between the predictors and a player's rank, 2) that the players are independent of each other, 3) that the error in the model is approximately normal, and 4) that the residuals do not have a pattern (i.e. growing with their variables).
+
+First, as previously discussed, the scatter plots did not show a clear linear relationship between the predictors and a player's rank, which means this assumption may be violated.  Second, while the players should largely be independent of each other, they are in competition with each other for lower ranks, and therefore this assumption may also be violated.  Third, when reviewing the normal Q-Q plot below there does appear to be some deviation from normality.  Fourth, while the residuals do not have a clear pattern, they do appear to be more positive than negative, suggesting their may be some deviation from this assumption.  The plots below also show that while there are some outliers in the data, there are no high leverage points impacting the model.
+
+Overall, it would seem that a linear regression model is not an excellent fit for the data; nevertheless, linear regression is generally robust to these assumptions and there is nothing suggesting that an alternative model would provide better performance. This would suggest that it is not possible to reasonably predict a player's average rank based on their attributes; and therefore, learned skills are the primary driver of a player's success in tennis.
+
+```{r echo=FALSE, fig.width=9, fig.height=4, fig.align="center", message=FALSE, warning = FALSE, results="asis", fig.fullwidth=TRUE}
+par(mfrow=c(1,4))
+plot(fit1)
+```
+
+Finally, to assess multicollinearity in the model, the variance inflation factor was analyzed for each of the predictors in the model as shown in the table below.  From the table, there are no multicollinearity concerns in the model.
+
+``` {r echo=FALSE, message=FALSE,results="asis",warning=FALSE} 
+# Plot VIF Table
+mat2 <- round(vif(fit1),4)
+
+rownames(mat2) <- c("Height", "Age", "Hand", "Region")
+
+kable(mat2,row.names=TRUE,
+      col.names=c("VIF", "Degrees of Freedom", "Scaled VIF"),format="html",booktabs=T,
+      caption="**Checking Multicollinearity of Linear Regression Model**") %>%
+  kable_styling(position="center",latex_options = c("hold_position"))
+
+
+```
+
+**Research Question 2**
+\
+For the second research question, similar exploratory analysis was reviewed using bar plots to review the factors. Specifically, bar plots were expected to show a relationship between the comparative number of upsets and the categorical variables, such as tournament type and surface types. The exploratory analysis did not establish a clear relationship between any of the categorical variables and the likelihood of an upset.  There did appear to be more upsets in the older and younger players; however, this is also potentially because these age ranges are only more likely to compete at the professional level, if they are particularly skilled.  Furthermore, there also appeared to be a potential relationship between upsets and height in the extremes, but, similarly, extreme heights also have small sample sizes.
+
+The coefficients of the model used to infer the factors that lead to an upset, along with the statistical analysis, are shown in the table below. Based on the table, the model suggests that the most important factors that lead to an upset are the tournament type and the surface. If the tournament is a Master's type tournament, the odds of an upset are reduced by approximately 1,595 times. If the match is played on grass, as opposed to a hard surface, or a clay surface, the odds of an upset increases by approximately 30 times. The next most important factor that leads to an upset is the lower-ranked player's age.  Every year the player's age increases, the odds of an upset increase by approximately 25%.  The model also shows a positive odds correlation with the winner's seed and rank, but this likely has to do with the fact that there is more potential for an upset with a lower ranked player. For example, a player with rank 9 can never be in position to have an upset.
+
+```{r echo=FALSE, fig.width=8, fig.height=4, fig.align="center", out.width="80%", message=FALSE}
+# Modeling the factors that lead to an upset
+# Generalized logistic Model for Q2
+fit3 <-glm(upset~winner_ht+winner_age+tour_fac+draw_size+surface_fac+tourney_date+winner_seed+winner_hand_fac+loser_hand+loser_ht+loser_age+round+winner_rank,family="binomial", data=tennis_upsetPotential[tennis_upsetPotential[, "tour_fac"] != "F",])
+
+mat3 <- matrix(round(summary(fit3)$coefficients[2:20,], 4), nrow = 19, ncol = 4)
+
+mat3v2 <- cbind(format(round(exp(mat3[,1]), 4), scientific=FALSE), mat3)
+
+mat3v3 <- rbind(mat3v2[1:2,], c("-------", "-------", "-------", "-------", "-------"), mat3v2[3:5,],
+                c("-------", "-------", "-------", "-------", "-------"), mat3v2[6:9,],
+                c("-------", "-------", "-------", "-------", "-------"), mat3v2[10,],
+                c("-------", "-------", "-------", "-------", "-------"), mat3v2[11:13,],
+                c("-------", "-------", "-------", "-------", "-------"), mat3v2[14:19,])
+
+rownames(mat3v3) <- c("Height (Underdog)", "Age (Underdog)", "Tournament Type: Standard", "Tournament Type: Grand Slam",
+                    "Tournament Type: Master's", "Draw Size", "Match Surface: Hard", "Match Surface: Clay",
+                    "Match Surface: Grass", "Tournament Date", "Seed (Underdog)", "Hand (Underdog): Right",
+                    "Hand (Underdog): Left", "Hand (Favorite): Left", "Hand (Favorite): Right", "Height (Favorite)",
+                    "Age (Favorite)", "Round: of 64", "Round: Quarter Finals", "Round: of 16", "Round: of 32",
+                    "Round: Round Robin", "Round: Semi-Finals", "Rank (Underdog)")
+
+kable(mat3v3,row.names=TRUE,
+      col.names=c("Odds Ratio", "Log Odds Estimate", "Standard Error", "Statistic",
+                  "p-value"),format="html",booktabs=T,
+      caption="**Predicting Players' Average Ranks**") %>%
+  kable_styling(position="center",latex_options = c("hold_position"))
+
+```
+
+To assess the accuracy of the model, a confusion matrix is shown below. The accuracy of the model is 95%, and it is clear from the confusion matrix that the model is very strong at predicting upsets. To confirm the validity of the accuracy, a cross validation analysis was run with five folds, and the average accuracy of the analysis was found to be 88%.  Therefore, it is reasonable to suggest that the identified factors do indeed impact the likelihood of an upset.
+
+``` {r echo=FALSE, message=FALSE, results="asis"} 
+# Show a confusion matrix
+confusionMatrix(as.factor(predict(fit3, type="response") > .5),
+                as.factor(tennis_upsetPotential[tennis_upsetPotential[, "tour_fac"] != "F", "upset"]))$table |>
+  kable(caption = "Confusion Matrix for Multiple Logistic Regression Model")|> kable_styling(latex_options = "HOLD_position")
+```
+
+## Conclusion
+
+After analyzing the data of the men's ATP tour-level matches in 2021, this analysis has shown that the data is insufficient to predict a player's average rank for a season based upon that player's attributes, but that the data is sufficient to understand the factors that impact an upset.  There is substantial variability in a player's rank that cannot be accounted for by the player's attributes alone.  To better understand how to predict a player's rank, there are two key factors that are unaccounted for in this analysis.  First, this analysis has been based upon a player's average rank for the season, but a season lasts several months and can have unexpected events, like injuries, which are not accounted for in this dataset.  To better understand a player's rank, the rank must be analyzed over the course of a season and identify reasons other than a player's attributes that impact rank.  Second, this analysis has only regressed a player's average rank based upon the player's attributes, and not upon the player's learned skills.  It is reasonable to expect that a player's skills are more impactful than their height and age on their performance.  Skills such as serve speed, lateral speed, and reaction time, among others, are all potential drivers of performance that are not captured in this dataset.
+
+After analyzing the factors that impact the likelihood of an upset, it has been shown that tournament type, match surface, and age are all strong indicators of the likelihood of an upset.  While the accuracy has been shown to be extremely high with the logistic model from this dataset, it is still possible that there are underlying confounding variables which impact the likelihood of an upset.  While age can be an indicator of maturity, it would be reasonable to believe that there is a mental component to an upset that is not accurately captured in this dataset.  Furthermore, tournament type and match surface are both external variables, and this analysis would suggest that a player has little ability to impact the likelihood of an upset on his own.  This is hopefully false, as a player would want to believe he can train to prepare for an upset.  Similar to research question 1, it would be beneficial to study how a player's skills or "recent" performance can impact the likelihood of an upset.
+
+## References
+[1] Jeff Sackmann: Tennis Abstract. [https://github.com/JeffSackmann/tennis_atp/blob/master/atp_matches_2021.csv](https://github.com/JeffSackmann/tennis_atp/blob/master/atp_matches_2021.csv). Accessed: 2022-10-01.
+
+[2] UN: Country Classification. [https://www.un.org/en/development/desa/policy/wesp/wesp_current/2014wesp_country_classification.pdf](https://www.un.org/en/development/desa/policy/wesp/wesp_current/2014wesp_country_classification.pdf). Accessed: 2022-11-01.
+
+[3] Wikimedia: List of countries by regional classification. [https://meta.wikimedia.org/wiki/List_of_countries_by_regional_classification](https://meta.wikimedia.org/wiki/List_of_countries_by_regional_classification). Accessed: 2022-11-01.
+
+[4] Deruite Stacy (2022), retrieved December 2, 2022 from: https://stacyderuiter.github.io/s245-notes-bookdown/collinearity-and-multicollinearity.html

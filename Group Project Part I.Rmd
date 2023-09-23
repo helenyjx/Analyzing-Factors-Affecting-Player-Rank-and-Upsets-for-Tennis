@@ -1,0 +1,202 @@
+---
+title: "Group Project Part I"
+author: "Gray Team (Nick Carroll, Emmanuel Ruhamyankaka, Jiaxin Ying, Song Young Oh)"
+date: "2022-10-21"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+
+# Import tennis data
+tennis2021 <- read.csv("atp_matches_2021.csv")
+
+# Creating a dataframe of players and their average ranks
+players <- unique(c(tennis2021$winner_id, tennis2021$loser_id))
+
+averageRank <- c()
+height <- c()
+age <- c()
+hand <- c()
+nationality <- c()
+
+for (eachPlayer in players){
+  averageRank <- append(averageRank, mean(c(tennis2021[tennis2021$winner_id == eachPlayer, "winner_rank"], tennis2021[tennis2021$loser_id == eachPlayer, "loser_rank"]), na.rm = TRUE))
+  height <- append(height, max(c(tennis2021[tennis2021$winner_id == eachPlayer, "winner_ht"], tennis2021[tennis2021$loser_id == eachPlayer, "loser_ht"])))
+  age <- append(age, mean(c(tennis2021[tennis2021$winner_id == eachPlayer, "winner_age"], tennis2021[tennis2021$loser_id == eachPlayer, "loser_age"])))
+  hand <- append(hand, max(c(tennis2021[tennis2021$winner_id == eachPlayer, "winner_hand"], tennis2021[tennis2021$loser_id == eachPlayer, "loser_hand"])))
+  nationality <- append(nationality, max(c(tennis2021[tennis2021$winner_id == eachPlayer, "winner_ioc"], tennis2021[tennis2021$loser_id == eachPlayer, "loser_ioc"])))
+}
+
+playerStats <- data.frame(players, averageRank, height, age, hand, nationality)
+
+playerStats$hand_fac <- factor(playerStats$hand)
+playerStats$nat_fac <- factor(playerStats$nationality)
+
+```
+
+### Data Overview
+
+The dataset is about the men’s ATP tour-level main draw matches in the year of 2021. The data, sourced by Jeff Sackmann of Tennis Abstract, contains a sample size of 2,733 matches. In the dataset, there are a total of 49 variables which include both continuous ones (such as the winner/loser’s number of serve points) and categorical ones (such as surface types of tennis courts). Based on this data, we seek to examine 1) if we can predict a tennis player’s rank by the factors such as height, age, nationality, and handedness and 2) identify which factors have the most significant impact of increasing the likelihood of an upset. Here, we have defined an upset as when the winner held a rank of at least 10 ranks lower than the loser.
+
+The data consists of the basic information for each match.  The data can be grouped into two parts: data that describes the match's attributes, such as tournament name and surface, and data that describes the results of the match broken down by the winner's attributes and performance separately from the loser's attributes and performance. The data includes a date and a match-specific numeric identifier for the tournament.  Additionally, there is information describing the tournament level which is broken down into five categories ('G' = Grand Slams, 'M' = Masters 1000s, 'A' = other tour-level events, 'D' = Davis Cup, 'F' = Tour finals and other season-ending events).  Most of the data is a type 'A' tournament (57%), followed by the 'M' and 'G' tournaments which each make up 19% of the data.
+
+
+```{r, echo=FALSE, fig.width=8, fig.height=4, fig.align="center", out.width="80%"}
+# Histogram of player's age & height
+par(mfrow=c(1,2))
+hist(tennis2021$winner_age, main="Histogram of Age", xlab="Age(years)", col=rgb(1,0,0,0.5))
+hist(tennis2021$loser_age, main="Histogram of Age", xlab="Age(years)", col=rgb(0,0,1,0.5),add=TRUE)
+legend('topright',legend=c('Winner', 'Loser'),
+      fill = c(rgb(1,0,0,0.5), rgb(0,0,1,0.5)), bty = 'n', border = NA)
+hist(tennis2021$winner_ht, main="Histogram of Height", xlab="Height(centimeters)", col=rgb(1,0,0,0.5))
+hist(tennis2021$loser_ht, main="Histogram of Height", xlab="Height(centimeters)", col=rgb(0,0,1,0.5),add=TRUE)
+legend('topright',legend=c('Winner', 'Loser'),
+      fill = c(rgb(1,0,0,0.5), rgb(0,0,1,0.5)), bty = 'n', border = NA)
+```
+
+The player-specific data covers a wide range of variables about the winner and loser, including their name, age, height, nationality, and handedness ('R' = right, 'L' = left, 'U' = unknown). The dataset also includes a player's ATP ranking information at the tournament date. Data analysis shows that each winner/loser's rank appears to have a heavily right-skewed distribution due to the concept of rank.  However, the difference between the two player's ranks for each match has a reasonably normal distribution, as shown in the histogram on the next page. Its median is estimated as a positive value of 19.
+
+```{r, echo=FALSE, fig.width=8, fig.height=4, fig.align="center", out.width="80%"}
+# Histogram of loser's - winner's rank
+hist(tennis2021$loser_rank - tennis2021$winner_rank, breaks = 50, main="Histogram of Loser's - Winner's Rank Difference", xlab="Loser's - Winner's Rank Difference")
+```
+
+Finally, the portion of the data describing the winner’s and losers' performances include each player's number of first serves made and the break points saved. The boxplot below shows the winner's number of first-serve points won in each surface type. The grass type of tennis court has the highest points based on the median value, and this result has also been found in the loser's case, which implies that tennis players are more likely to have more first-serve points when they play on the grass compared to clay or hard court. A strong positive relationship exists in the scatterplot on the right side between the winner's number of serve points and match length in minutes.
+
+```{r, echo=FALSE, fig.width=8, fig.height=4, fig.align="center", out.width="80%", warning=FALSE}
+par(mfrow=c(1,2))
+boxplot(tennis2021$w_1stWon ~ tennis2021$surface, xlab = "Surface Type", ylab = "Winner's First-serve Points", main = "Boxplot of Winner's First-serve \nPoints by Surface Type")
+plot(tennis2021$w_svpt, tennis2021$minutes, xlab="Winner's Serve Points", ylab="Match Length(minutes)", main="Scatterplot between Winner's\nServe Points and Match Length")
+```
+
+### Review of Primary Relationship of Interest
+
+#### Prediciton of a Tennis Player's Rank by Height, Age, Nationality, and Handedness
+
+To see if there is a relationship between a player's rank and his natural characteristics (height, age, nationality, and handedness), scatter plots are shown below of the player's rank against each of these characteristics.  Since rank is a dependent variable that changes over time according to a player's performance, these scatter plots show each player's average rank for the season against his attributes.  Unfortunately, the scatter plots do not show any real correlation between height or handedness and a player's rank.  Age also doesn't appear to have a strong correlation; however, there is a very loose correlation with older players having a better rank.  This seems to make sense, as you would not expect older players to continue playing unless they are still capable of competing at a high level.  The plots also don't show a clear correlation between nationality and rank; however, while most nationalities do not have a correlation with rank, there are clearly some nationalities that tend to have higher ranks than others.
+
+```{r echo=FALSE, fig.width=8, fig.height=4, fig.align="center", out.width="80%"}
+# Plotting scatter plots of rank vs attributes
+par(mfrow=c(1,2))
+plot(averageRank ~ height, data = playerStats, ylab = "Average Rank", main = "Rank vs. Height", col=rgb(0,0,1,0.5))
+plot(averageRank ~ age, data = playerStats, ylab = "Average Rank", main = "Rank vs. Age", col=rgb(0,0,1,0.5))
+plot(averageRank ~ hand_fac, data = playerStats, xlim = c(1.5,3.5), xlab = "Hand", ylab = "Average Rank", main = "Rank vs. Hand", col=rgb(0,0,1,0.5))
+plot(averageRank ~ nat_fac, data = playerStats, xlab = "Nationality", ylab = "Average Rank", main = "Rank vs. Nationality", col=rgb(0,0,1,0.5))
+```
+
+#### Factors that can lead to an upset
+
+To review the factors that lead to an upset, bar plots show the comparative number of upsets versus categorical variables, and line plots show the comparative number of upsets versus continuous variables.  The bar plots do not establish a clear relationship between any of the categorical variables (the "F" type tournament is a small sample size) and the likelihood of an upset.  The continuous variables also do not appear to be a clear indicator of upsets.  There does appear to be more upsets in the older and younger players, but this is also potentially because these age ranges are more likely to compete at the professional level if they are particularly skilled.  There also appears to be a potential relationship between upsets and height in the extremes, but extreme heights are also small sample sizes.
+
+```{r echo=FALSE, fig.width=8, fig.height=4, fig.align="center", out.width="80%"}
+# Reviewing Upsets
+tennis2021$upset <- (tennis2021$loser_rank - tennis2021$winner_rank) < -10
+tennis2021$tour_fac <- factor(tennis2021$tourney_level)
+tennis2021$surface_fac <- factor(tennis2021$surface)
+
+par(mfrow=c(1,3))
+
+tour <- table(c(tennis2021[tennis2021$upset, "upset"],
+                tennis2021[(tennis2021$loser_rank - tennis2021$winner_rank) > 10, "upset"]),
+              c(tennis2021[tennis2021$upset, "tour_fac"],
+                tennis2021[(tennis2021$loser_rank - tennis2021$winner_rank) > 10, "tour_fac"]))
+norm_tour <- prop.table(tour,2)
+barplot(norm_tour, , col=c(rgb(1,0,0,0.5), rgb(0,0,1,0.5)), xlab = "Tournament Type", ylab = "Proportion of Upsets", main = "Likelihood of Upsets vs.\nTournament Type")
+
+barplot(prop.table(table(c(tennis2021[tennis2021$upset, "upset"],
+                tennis2021[(tennis2021$loser_rank - tennis2021$winner_rank) > 10, "upset"]),
+              c(tennis2021[tennis2021$upset, "draw_size"],
+                tennis2021[(tennis2021$loser_rank - tennis2021$winner_rank) > 10, "draw_size"])),
+        2), col=c(rgb(1,0,0,0.5), rgb(0,0,1,0.5)), xlab = "Tournament Size", ylab = "Proportion of Upsets", main = "Likelihood of Upsets vs.\nTournament Size")
+
+barplot(prop.table(table(c(tennis2021[tennis2021$upset, "upset"],
+                tennis2021[(tennis2021$loser_rank - tennis2021$winner_rank) > 10, "upset"]),
+              c(tennis2021[tennis2021$upset, "surface_fac"],
+                tennis2021[(tennis2021$loser_rank - tennis2021$winner_rank) > 10, "surface_fac"])),
+        2), col=c(rgb(1,0,0,0.5), rgb(0,0,1,0.5)), xlab = "Surface Type", ylab = "Proportion of Upsets", main = "Likelihood of Upsets vs.\nSurface Type")
+legend('bottom',legend=c('Not Upset', 'Upset'),
+      fill = c(rgb(1,0,0,0.5), rgb(0,0,1,0.5)))
+```
+
+
+```{r echo=FALSE, fig.width=8, fig.height=4, fig.align="center", out.width="80%"}
+
+par(mfrow=c(1,2))
+
+age <- table(c(tennis2021[tennis2021$upset, "upset"],
+                tennis2021[(tennis2021$loser_rank - tennis2021$winner_rank) > 10, "upset"]),
+              c(tennis2021[tennis2021$upset, "winner_age"],
+                tennis2021[(tennis2021$loser_rank - tennis2021$winner_rank) > 10, "winner_age"]))
+norm_age <- prop.table(age,2)
+plot(names(norm_age[1,-50]), norm_age[1,-50], col=rgb(1,0,0,0.5), lwd = 3, type = "l", xlab = "Winner's Age", ylab = "Proportion of Upsets", main = "Likelihood of Upsets vs. Age")
+lines(names(norm_age[2,-50]), norm_age[2,-50], col=rgb(0,0,1,0.5), lwd = 3)
+
+height <- table(c(tennis2021[tennis2021$upset, "upset"],
+                tennis2021[(tennis2021$loser_rank - tennis2021$winner_rank) > 10, "upset"]),
+              c(tennis2021[tennis2021$upset, "winner_ht"],
+                tennis2021[(tennis2021$loser_rank - tennis2021$winner_rank) > 10, "winner_ht"]))
+norm_height <- prop.table(height,2)
+plot(names(norm_height[1,-50]), norm_height[1,-50], col=rgb(1,0,0,0.5), lwd = 3, type = "l", xlab = "Winner's Height", ylab = "Proportion of Upsets", main = "Likelihood of Upsets vs. Height")
+lines(names(norm_height[2,-50]), norm_height[2,-50], col=rgb(0,0,1,0.5), lwd = 3)
+legend('bottom', legend=c('Not Upset', 'Upset'),
+      fill = c(rgb(1,0,0,0.5), rgb(0,0,1,0.5)))
+```
+
+### Other Characteristics
+
+There are some other variables which are not considered to be used for answering our research questions (predicting the player's rank and upset likehood), but they are still worth to be mentioned as the specific description of their column names. As a result, we divided them into three different types, which are Tourney information, Winner/Loser Inforamtion and Match Information.
+
+*Tourney information:*
+
+* tourney_id:
+It is a unique identifier for each tournament, such as 2021-0096. While the first four characters represent the specific year, the rest of the number doesn't follow a predictable structure.
+* tourney_name:
+Tournament name, such as Tokyo Olympics, Munich, and Queen's Club.
+
+*Winner/Loser Inforamtion:*
+
+* score:
+It is a palyer's final score.
+* winner/loser_seed:
+Seed of match winner/loser.
+* winner/loser_entry:
+There are five main types of entry: 'WC' = wild card, 'Q' = qualifier, 'LL' = lucky loser, 'PR' = protected ranking, 'ITF' = ITF entry. Some others are occasionally used.
+* winner/loser_name:
+The name of winner/loser.
+* w/l_ace:
+winner's/loser’s number of aces.
+* w/l_df:
+winner's/loser’s number of doubles faults.
+* w/l_svpt:
+winner's/loser’s number of serve points.
+* w/l_1stIn:
+winner's/loser’s number of first serves made.
+* w/l_1stWon:
+winner's/loser’s number of first-serve points won.
+* w/l_2ndWon:
+winner's/loser’s number of second-serve points won.
+* w/l_SvGms:
+winner's/loser’s number of serve games.
+* w/l_bpSaved:
+winner's/loser’s number of break points saved.
+* w/l_bpFaced:
+winner's/loser’s number of break points faced.
+
+*Match Information:*
+
+* best_of:
+A maximum of sets can be played to decide the outcome. There are two types: '3' or '5', indicating the number of sets for this match.
+Best of 5 means - whoever is first to win total 3 sets, wins.
+Best of 3 means - whoever is first to win total 2 sets, wins.
+* minutes:
+It is the length of match.
+
+### Potential Challenges
+From the preliminary EDA, there doesn't seem to be a strong correlation between the predictor and dependent variables. The variables that correlate with rank tend to have a small sample size of observations in the data. For example, there appears to be a slight correlation with senior players having a better rank; however, it is uncertain if this is an accurate predictor or if there are confounding variables because the older players tend to continue playing because they are great players.  Rank is particularly difficult to work with because it is ordinal, must be unique, and is a time-series variable.  This analysis assumed that rank was a dependent variable on a player's attributes and reviewed the average rank for a player over the entirety of the season; however, a player's average rank may not be an accurate representation of his actual rank because his rank may have changed for a portion of the season due to injuries.  Furthermore, while rank should be ordinal and unique, average rank is not required to be either ordinal or unique.
+
+Many of the variables of interest have some missing values, which will cause noise during the modeling stage. For example, handedness has several missing values, meaning several players are considered neither left-handed nor right-handed in the model. These players will likely be dropped during the modeling phase.

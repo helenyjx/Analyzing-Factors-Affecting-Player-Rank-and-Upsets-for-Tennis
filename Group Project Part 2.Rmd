@@ -1,0 +1,105 @@
+---
+title: "Group Project Part II"
+author: "Gray Team (Nick Carroll, Emmanuel Ruhamyankaka, Jiaxin Ying, Song Young Oh)"
+date: "2022-11-04"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+linkcolor: blue
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+
+# Import tennis data
+tennis2021 <- read.csv("atp_matches_2021.csv")
+
+# Creating a dataframe of players and their average ranks
+players <- unique(c(tennis2021$winner_id, tennis2021$loser_id))
+
+averageRank <- c()
+height <- c()
+age <- c()
+hand <- c()
+nationality <- c()
+
+for (eachPlayer in players){
+  averageRank <- append(averageRank, mean(c(tennis2021[tennis2021$winner_id == eachPlayer, "winner_rank"], tennis2021[tennis2021$loser_id == eachPlayer, "loser_rank"]), na.rm = TRUE))
+  height <- append(height, max(c(tennis2021[tennis2021$winner_id == eachPlayer, "winner_ht"], tennis2021[tennis2021$loser_id == eachPlayer, "loser_ht"])))
+  age <- append(age, mean(c(tennis2021[tennis2021$winner_id == eachPlayer, "winner_age"], tennis2021[tennis2021$loser_id == eachPlayer, "loser_age"])))
+  hand <- append(hand, max(c(tennis2021[tennis2021$winner_id == eachPlayer, "winner_hand"], tennis2021[tennis2021$loser_id == eachPlayer, "loser_hand"])))
+  nationality <- append(nationality, max(c(tennis2021[tennis2021$winner_id == eachPlayer, "winner_ioc"], tennis2021[tennis2021$loser_id == eachPlayer, "loser_ioc"])))
+}
+
+playerStats <- data.frame(players, averageRank, height, age, hand, nationality)
+
+playerStats$hand_fac <- factor(playerStats$hand)
+playerStats$nat_fac <- factor(playerStats$nationality)
+
+```
+
+### Overview
+In this project, we analyze a dataset about the men's ATP tour-level main draw matches in the year of 2021, provided by Jeff Sackmann manager of Tennis Abstract. The data samples 2,733 tennis matches and includes 49 variables which includes both continuous and categorical variables. The dataset can be grouped into two parts: data that describes each match's attributes (such as tournament name and surface types) and data that describes the results of the match, including the winner's and loser's attributes and performance separately. This data will be used to try to answer two research questions: 
+
+1) Can we predict a tennis player's rank by his attributes, specifically: height, age, nationality, and handedness?
+2) Which factors have the greatest impact on the likelihood of an upset?  Throughout this analysis, an upset is defined as when the winner held a rank of at least 10 ranks lower than the loser.
+
+### Models
+
+*Research Question 1*
+\newline
+To analyze the first research question, a multiple linear regression model will be used to predict the outcome of a tennis player's rank based on his multiple predictor attributes. Although rank is not technically a continuous variable, it can be estimated as a continuous variable on this scale, because rank has at least 200 possible options in this dataset. Furthermore, while rank is the desired outcome, this analysis actually seeks to predict average rank over the course of the season. While rank changes over the season in accordance with performance, a player's attributes are (approximately) static over the season, so it makes more sense to predict average rank. In this scenario, average rank is actually a continuous variable because it can contain any degree of decimal values. Based on the scatter plots of the exploratory data analysis, relationships between the outcome and predictor variables are expected to be either minimal or linear.
+
+*Research Question 2*
+\newline
+To analyze the second research question, a multiple logistic regression model will be used to evaluate the probability of an upset occurring. As previously mentioned, an upset is defined as the winner's rank being at least 10 ranks lower than the loser's. Due to the binary nature of an upset and the multiple potential predictor variables, a multiple logistic regression is the appropriate model for this analysis.
+
+### Variable selection
+
+*Research Question 1*
+\newline
+This dataset includes 49 variables; however many of the variables are not appropriate for the focus of this analysis. Therefore, all variables have been chosen a priori based upon domain knowledge of the drivers of a player's performance in sports. Since the first question's analysis focuses on predicting a tennis player’s average rank, only factors which are player specific will be considered. Specifically, variables which are tournament-specific (i.e. tournament name) or match-specific (i.e. round or serve points) are not to be included in the model. In professional sports, high performers usually have unique attributes compared with the rest of the normal population, including specific height ranges, age ranges, and regional and socio-economic backgrounds. Handedness is an attribute with particular importance in tennis, because it is common for one player to have a dominant swing known as a "forehand". Due to these expectations, the variables selected for the multiple linear regression model to predict a player's average rank is height, age, nationality, and handedness. 
+
+Unfortunately, the scatter plots of player's rank against height and handedness do not show any real correlation between the rank and these predictor variables. Age also doesn't appear to have a strong correlation; however, there is a very loose correlation with older players having a better rank. This seems to make sense, as you would not expect older players to continue playing unless they are still capable of competing at a high level.
+
+The plots also don't show a clear correlation between nationality and rank; however, while most nationalities do not have a correlation with rank, there are clearly some nationalities that tend to have higher ranks than others. To simplify the relationship between nationality and rank, the 72 countries in the dataset can be grouped into a subset of "developed" and "developing" countries. A "developing" country has a lower GDP than developed countries and a less mature economy. Conversely, a "developed" country has a higher GDP and a more mature economy. For the purposes of this analysis the "developed" countries are defined from this [link](https://www.un.org/en/development/desa/policy/wesp/wesp_current/2014wesp_country_classification.pdf) and all other countries are considered "developing". Based on the boxplot in the appendix, there is not a significant difference between players' ranks from "developing" countries vs. "developed" countries. Additionally, the subset of developing and developed countries can be compared with the subset of countries by region as defined from this [link](https://meta.wikimedia.org/wiki/List_of_countries_by_regional_classification). Boxplots in the appendix compare the relationship of region and developed country status with player's rank.
+
+*Research Question 2*
+\newline
+The analysis of the second research questions focuses on the factors that impact the likelihood of an upset. Similarly, most of the variables in the dataset are not appropriate for this analysis; and again, predictor variables are chosen a priori based upon expectations of sports knowledge. Variables that are not appropriate for this analysis include match statistics (because this information would not be available prior to a match, and would be collinear with the outcome of the match) and tournament information that is not play-specific (i.e. tournament id and name). Conversely, based upon the exploratory data analysis, variables that are of particular interest are Tournament Type and Size, Surface Type, and the winner's attributes (i.e. height). From the subset of a priori selected variables, backwards selection will be used to analyze the appropriateness of each of the selected variables. The player's attributes (height, age, etc.) are chosen to understand how the player can impact the likelihood of an upset. The tournament/match information (surface, size, etc.) can provide inference information into how external factors impact the likelihood of an upset. Finally, tournament type can provide inference information into how a player's mentality can change in different match situations.
+
+### Challenges
+There were three potential challenges presented in part 1. First, there is a weak correlation between the predictor variables and the dependent variables. During the comparison of a priori variable selection to the backwards selection, variables will be dropped accordingly. However, variables strongly related to the question of interest will be held in the model regardless of correlation and backwards selection results. Second, rank is a strange variable because it should be ordinal, unique, and a time-series variable. In the modeling stage, rank will be treated as a dependent variable and  the average rank will be analyzed for a player over the entire season. There are still challenges with a player's average rank because a player's average rank may not be an accurate representation of his actual rank.  For example, a player's average rank may be misleading due to external factors, such as injuries, that could hinder performance during the season. Third, there are concerns about missing values in the dataset. Most of the missing data in the dataset appears to be random, and therefore safe to exclude from the dataset. Nevertheless, it is important to understand the removed missing data to avoid introducing bias in the model.  
+
+\newpage
+### Appendix: Plots for Research Question 1
+```{r echo=FALSE, fig.width=8, fig.height=6, fig.align="center", out.width="70%"}
+playerStats$country=rep(NA,393)
+for (i in 1:393) {
+  if(playerStats$nat_fac[i] %in% c("AUT","CAN","CYP","BEL","CZE","USA","AUS","SWE","JPN","DEN","ESP","EST","FIN","FRA","GBR","GER","HUN","ISR","ITA","LAT","LBN","LIB","LTU","NED","NOR","NZL","POR","SLO","SUI","SVK","SWE","TUR")){
+    playerStats$country[i]="developed"
+  } else{
+    playerStats$country[i]="developing"
+  }
+}
+par(mfrow=c(1,1))
+boxplot(averageRank ~ country, data = playerStats, xlab = "Country Development Status", ylab = "Average Rank", main = "Rank vs. Country Development", col=rgb(0,0,1,0.5))
+
+playerStats$region[playerStats$nat_fac %in% c("USA", "CAN", "DOM", "MEX")] <- "N. Amer."
+playerStats$region[playerStats$nat_fac %in% c("COL", "GEO", "ARG", "URU", "ECU", "PER", "BRA", "BOL", "ESA", "PAR", "VEN",
+                                              "CHI", "BAR")] <- "S. Amer."
+playerStats$region[playerStats$nat_fac %in% c("GER", "FRA", "GBR", "ESP", "ITA", "SUI", "BEL", "NED", "AUT", "SWE", "GRE",
+                                              "POR", "MON")] <- "W Eur."
+playerStats$region[playerStats$nat_fac %in% c("CZE", "SRB", "BLR", "CRO", "RUS", "POL", "FIN", "DEN", "HUN", "BUL", "SLO", "SWE",
+                                              "LTU", "NOR", "SVK", "BIH",  "UKR", "MDA", "ROU", "EST",  "CYP",
+                                              "LAT")] <- "E Eur."
+playerStats$region[playerStats$nat_fac %in% c("IND", "KAZ", "JPN", "CHN", "TPE",  "KOR", "INA", "NZL", "PAK",
+                                              "THA",  "AUS", "UZB")] <- "Asia"
+playerStats$region[playerStats$nat_fac %in% c("TUR", "ISR", "QAT", "LBN")] <- "Mid East"
+playerStats$region[playerStats$nat_fac %in% c("RSA", "ZIM", "EGY", "LIB", "TUN")] <- "Africa"
+
+boxplot(averageRank ~ region, data = playerStats, xlab = "Continental Region", ylab = "Average Rank", main = "Rank vs. Continental Region", col=rgb(0,0,1,0.5))
+```
+
